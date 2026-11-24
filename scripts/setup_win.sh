@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
+
 # ==============================================================================
 # NIBB ゲノムインフォマティクス・トレーニングコース (GITC 2027 春)
 # Windows 11 (WSL2 / Ubuntu 24.04 LTS) 用 解析環境自動セットアップスクリプト
 #
+# 動作対象環境:
+#   - OS : Windows 11 (サポート期間内) + WSL 2 + Ubuntu 24.04 LTS
+#   - CPU: x86_64 (Intel / AMD) または aarch64 (ARM64)
+#
 # 設計方針:
 #   - 不足しているソフトウェアのみを補完し、既存の解析環境（apt / Conda /
 #     手動配置ツール・Python 環境）の優先順位や設定は極力変更しない。
+#   - PEP 668 に準拠し、システム Python への --break-system-packages による
+#     直接インストールは行わず、Ubuntu 24.04 公式パッケージのみを導入する。
 #
 # 使い方:
 #   curl -O https://raw.githubusercontent.com/nibb-unix/gitc202702-unix/main/scripts/setup_win.sh
@@ -33,6 +40,7 @@ trap cleanup EXIT
 # インストールに失敗した項目を記録する配列
 FAILED_PACKAGES=()
 
+echo ""
 echo "============================================================"
 echo " NIBB GITC 解析環境セットアップ (Windows 11 / Ubuntu 24.04)"
 echo "============================================================"
@@ -54,8 +62,9 @@ if [ -f /etc/os-release ]; then
 fi
 
 if [ "${ID:-}" != "ubuntu" ] || [ "${VERSION_ID:-}" != "24.04" ]; then
-    echo -e "${RED}[エラー] このスクリプトは Ubuntu 24.04 専用です。${NC}"
+    echo -e "${RED}[エラー] このスクリプトは Ubuntu 24.04 LTS 専用です。${NC}"
     echo "検出された OS: ${PRETTY_NAME:-不明}"
+    echo "Windows 11 上の Ubuntu 24.04 LTS ターミナルから実行してください。"
     exit 1
 fi
 
@@ -64,12 +73,15 @@ case "$ARCH_NAME" in
     x86_64|aarch64)
         ;;
     *)
-        echo -e "${RED}[エラー] 非対応の CPU アーキテクチャです: $ARCH_NAME${NC}"
+        echo -e "${RED}[エラー] 非対応の CPU アーキテクチャです: ${ARCH_NAME}${NC}"
         exit 1
         ;;
 esac
 
-echo "検出されたシステム: ${PRETTY_NAME} ($ARCH_NAME)"
+echo "検出されたシステム: ${PRETTY_NAME} (${ARCH_NAME})"
+if grep -qi "microsoft" /proc/version 2>/dev/null; then
+    echo "実行環境種別      : Windows Subsystem for Linux (WSL)"
+fi
 echo ""
 echo "これより不足している解析ソフトウェアのインストールを開始します。"
 echo "途中で [sudo] password for ... と表示されたら、"
@@ -97,7 +109,7 @@ fi
 echo ""
 echo "------------------------------------------------------------"
 echo " [Step 2/4] 解析ソフトウェアを一括インストールしています..."
-echo " （通信環境により 5〜15 分程度かかる場合があります）"
+echo " （通信環境や PC の性能により 5〜15 分程度かかる場合があります）"
 echo "------------------------------------------------------------"
 
 # Ubuntu 24.04 公式リポジトリのパッケージを導入
@@ -301,6 +313,7 @@ if [ "$ALL_OK" = true ]; then
 else
     echo -e " ${RED}一部のソフトウェアのインストールまたは動作確認が完了しませんでした。${NC}"
     echo " 1. 一度ターミナルを閉じて開き直し、再度 bash setup_win.sh を実行してください。"
-    echo " 2. それでも [NG] が残る場合は、Wiki の「手動インストール」手順をお試しください。"
+    echo " 2. それでも [NG] が残る場合は、Wiki の「Windows 11 手動インストール手順」をお試しください。"
 fi
 echo "============================================================"
+echo ""

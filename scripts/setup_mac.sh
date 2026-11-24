@@ -2,7 +2,11 @@
 
 # ==============================================================================
 # NIBB ゲノムインフォマティクス・トレーニングコース (GITC 2027 春)
-# macOS (Apple Silicon / Intel Mac) 用 解析環境自動セットアップスクリプト
+# macOS (Apple Silicon / macOS Sequoia 15 以降) 用 解析環境自動セットアップスクリプト
+#
+# 動作対象環境:
+#   - CPU: Apple Silicon 搭載 Mac (arm64: M1 / M2 / M3 / M4 / M5 等)
+#   - OS : macOS Sequoia (15) 以降
 #
 # 設計方針:
 #   - 不足しているソフトウェアのみを補完し、既存の解析環境（Homebrew / Conda /
@@ -26,12 +30,12 @@ FAILED_PACKAGES=()
 
 echo ""
 echo "============================================================"
-echo " NIBB GITC 解析環境セットアップ (macOS)"
+echo " NIBB GITC 解析環境セットアップ (macOS / Apple Silicon)"
 echo "============================================================"
 echo ""
 
 # ------------------------------------------------------------------------------
-# 0. 実行環境の事前チェック（macOS / CPU / Command Line Tools / Homebrew）
+# 0. 実行環境の事前チェック（macOS / Apple Silicon / macOS 15+ / CLT / Homebrew）
 # ------------------------------------------------------------------------------
 OS_NAME="$(uname -s)"
 if [ "$OS_NAME" != "Darwin" ]; then
@@ -41,38 +45,50 @@ if [ "$OS_NAME" != "Darwin" ]; then
 fi
 
 ARCH_NAME="$(uname -m)"
-case "$ARCH_NAME" in
-    arm64|x86_64)
-        ;;
-    *)
-        echo -e "${RED}[エラー] 非対応の CPU アーキテクチャです: $ARCH_NAME${NC}"
-        exit 1
-        ;;
-esac
+if [ "$ARCH_NAME" != "arm64" ]; then
+    echo -e "${RED}[エラー] このスクリプトは Apple Silicon 搭載 Mac（arm64）専用です。${NC}"
+    echo "検出された CPU アーキテクチャ: ${ARCH_NAME}"
+    if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+        echo ""
+        echo -e "${YELLOW}[ヒント] お使いのターミナルアプリが Intel 互換モード（Rosetta 2）で起動しています。${NC}"
+        echo "ターミナルを終了（Command + Q）し、Finder で「ターミナル.app」の「情報を見る」から"
+        echo "「Rosetta を使用して開く」のチェックを外してから再度実行してください。"
+    else
+        echo "Intel プロセッサ搭載 Mac は Homebrew 公式仕様変更によりサポート対象外となります。"
+    fi
+    exit 1
+fi
 
-MACOS_VER="$(sw_vers -productVersion 2>/dev/null || echo '不明')"
-echo "検出されたシステム: macOS ${MACOS_VER} (${ARCH_NAME})"
+MACOS_VER="$(sw_vers -productVersion 2>/dev/null || echo '0.0')"
+MACOS_MAJOR="${MACOS_VER%%.*}"
+if ! [[ "$MACOS_MAJOR" =~ ^[0-9]+$ ]] || [ "$MACOS_MAJOR" -lt 15 ]; then
+    echo -e "${RED}[エラー] macOS Sequoia (15) 以降が必要です。${NC}"
+    echo "検出された macOS バージョン: macOS ${MACOS_VER}"
+    echo "「システム設定」＞「一般」＞「ソフトウェアアップデート」から"
+    echo "macOS Sequoia (15) 以降にアップデートしたうえで、再度このスクリプトを実行してください。"
+    exit 1
+fi
+
+echo "検出されたシステム: macOS ${MACOS_VER} (${ARCH_NAME} / Apple Silicon)"
 echo ""
 
 # Xcode Command Line Tools の確認
 if ! xcode-select -p >/dev/null 2>&1; then
     echo -e "${RED}[エラー] Xcode Command Line Tools がインストールされていません。${NC}"
-    echo "先に PDF マニュアル（setup_mac.pdf）の手順 1-2 に従い、以下を実行してください:"
+    echo "先に PDF マニュアル（setup_mac.pdf）の手順に従い、以下を実行してください:"
     echo "  xcode-select --install"
     exit 1
 fi
 
-# Homebrew の検出と有効化
+# Homebrew の検出と有効化（Apple Silicon 標準パス /opt/homebrew を優先）
 BREW_BIN=""
-if command -v brew >/dev/null 2>&1; then
-    BREW_BIN="$(command -v brew)"
-elif [ -x "/opt/homebrew/bin/brew" ]; then
+if [ -x "/opt/homebrew/bin/brew" ]; then
     BREW_BIN="/opt/homebrew/bin/brew"
-elif [ -x "/usr/local/bin/brew" ]; then
-    BREW_BIN="/usr/local/bin/brew"
+elif command -v brew >/dev/null 2>&1; then
+    BREW_BIN="$(command -v brew)"
 else
     echo -e "${RED}[エラー] Homebrew (brew) が見つかりませんでした。${NC}"
-    echo "先に PDF マニュアル（setup_mac.pdf）の手順 1-3 に従い、Homebrew をインストールしてください。"
+    echo "先に PDF マニュアル（setup_mac.pdf）の手順に従い、Homebrew をインストールしてください。"
     exit 1
 fi
 
@@ -195,7 +211,7 @@ echo "------------------------------------------------------------"
 ZPROFILE="$HOME/.zprofile"
 touch "$ZPROFILE"
 
-# Apple Silicon Mac (/opt/homebrew/bin/brew) の場合、未登録なら brew shellenv を追記
+# Apple Silicon Mac (/opt/homebrew/bin/brew) の PATH 設定を未登録時のみ追記
 if [ "$BREW_BIN" = "/opt/homebrew/bin/brew" ]; then
     BREW_ENV_LINE='eval "$(/opt/homebrew/bin/brew shellenv)"'
     if ! grep -Fqx "$BREW_ENV_LINE" "$ZPROFILE"; then
