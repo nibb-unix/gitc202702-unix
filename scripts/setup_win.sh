@@ -10,7 +10,7 @@
 #
 # 設計方針:
 #   - 不足しているソフトウェアのみを補完し、既存の解析環境（apt / Conda /
-#     手動配置ツール・Python 環境）の優先順位や設定は極力変更しない。
+#     手動配置ツール・Python 環境・シェル設定）の優先順位や設定は極力変更しない。
 #   - PEP 668 に準拠し、システム Python への --break-system-packages による
 #     直接インストールは行わず、Ubuntu 24.04 公式パッケージのみを導入する。
 #
@@ -129,6 +129,11 @@ APT_PACKAGES=(
 )
 
 for pkg in "${APT_PACKAGES[@]}"; do
+    if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -qx "install ok installed"; then
+        echo ">>> $pkg は既に apt で導入済みです（スキップ）。"
+        continue
+    fi
+
     echo ">>> インストール中: $pkg"
     if ! sudo apt-get install -y \
         -o Dpkg::Options::="--force-confdef" \
@@ -225,31 +230,64 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 3. パス（PATH）の自動設定（~/.bashrc に統一・既存環境の優先順位を維持）
+# 3. シェル環境（PATH・ls 表示）の自動設定（~/.bashrc・既存環境の優先順位を維持）
 # ------------------------------------------------------------------------------
 echo ""
 echo "------------------------------------------------------------"
-echo " [Step 4/4] パス（PATH）の設定を反映しています..."
+echo " [Step 4/4] シェル環境（PATH・ls 表示）の設定を反映しています..."
 echo "------------------------------------------------------------"
 
-# 既存環境（/usr/local/bin や Conda 等）の優先順位を変えないよう末尾に追加する
-PATH_LINE='export PATH="$PATH:$HOME/bin:$HOME/bin/sratoolkit/bin"'
 RC_FILE="$HOME/.bashrc"
-
 touch "$RC_FILE"
-if ! grep -Fxq "$PATH_LINE" "$RC_FILE"; then
-    {
-        echo ""
-        echo "# Added by NIBB GITC setup script"
-        echo "$PATH_LINE"
-    } >> "$RC_FILE"
-    echo ">>> $RC_FILE に PATH 設定を追記しました。"
+
+# (1) ~/bin および ~/bin/sratoolkit/bin の PATH 設定（重複登録を防止して末尾に追加）
+if grep -Fq "# Added by NIBB GITC setup script (User bin PATH)" "$RC_FILE" || \
+   grep -Fq 'export PATH="$PATH:$HOME/bin:$HOME/bin/sratoolkit/bin"' "$RC_FILE"; then
+    echo ">>> $RC_FILE には既に GITC の PATH 設定が存在します（スキップ）。"
 else
-    echo ">>> $RC_FILE には既に同じ PATH 設定が存在します（スキップ）。"
+    cat << 'EOF' >> "$RC_FILE"
+
+# Added by NIBB GITC setup script (User bin PATH)
+case ":$PATH:" in
+    *":$HOME/bin:"*) ;;
+    *) [ -d "$HOME/bin" ] && export PATH="$PATH:$HOME/bin" ;;
+esac
+if [ -d "$HOME/bin/sratoolkit/bin" ]; then
+    case ":$PATH:" in
+        *":$HOME/bin/sratoolkit/bin:"*) ;;
+        *) export PATH="$PATH:$HOME/bin/sratoolkit/bin" ;;
+    esac
+fi
+EOF
+    echo ">>> $RC_FILE に PATH 設定（重複防止ガード付き）を追記しました。"
 fi
 
-# 現在のスクリプト実行環境にも PATH を即時適用
-export PATH="$PATH:$HOME/bin:$HOME/bin/sratoolkit/bin"
+# 現在のスクリプト実行環境にも PATH を即時適用（重複なし）
+case ":$PATH:" in
+    *":$HOME/bin:"*) ;;
+    *) export PATH="$PATH:$HOME/bin" ;;
+esac
+if [ -d "$HOME/bin/sratoolkit/bin" ]; then
+    case ":$PATH:" in
+        *":$HOME/bin/sratoolkit/bin:"*) ;;
+        *) export PATH="$PATH:$HOME/bin/sratoolkit/bin" ;;
+    esac
+fi
+
+# (2) ls の色分け表示設定（Ubuntu 標準の alias ls='ls --color=auto' 等がある場合は尊重してスキップ）
+if grep -Eq '^[[:space:]]*[^#]*(alias[[:space:]]+ls=|ls[[:space:]]*\(\))' "$RC_FILE" "$HOME/.bash_aliases" 2>/dev/null || \
+   grep -Fq "# Added by NIBB GITC setup script (ls color)" "$RC_FILE" 2>/dev/null; then
+    echo ">>> 既存の ls 表示設定（Ubuntu 標準設定等）を検出しました（スキップ）。"
+else
+    cat << 'EOF' >> "$RC_FILE"
+
+# Added by NIBB GITC setup script (ls color)
+if [[ "$(type -t ls 2>/dev/null)" == "file" ]]; then
+    alias ls='ls -F --color=auto'
+fi
+EOF
+    echo ">>> $RC_FILE に ls の表示設定（既存設定優先ガード付き）を追記しました。"
+fi
 
 # ------------------------------------------------------------------------------
 # 4. 環境構築セルフチェック（コマンドの存在・実行確認とバージョン表示）
@@ -282,6 +320,7 @@ check_tool() {
 }
 
 check_tool "curl" "curl" "curl --version"
+check_tool "wget" "wget" "wget --version"
 check_tool "unzip" "unzip" "unzip -v"
 check_tool "bowtie2" "bowtie2" "bowtie2 --version"
 check_tool "samtools" "samtools" "samtools --version"

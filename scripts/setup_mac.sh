@@ -10,7 +10,7 @@
 #
 # 設計方針:
 #   - 不足しているソフトウェアのみを補完し、既存の解析環境（Homebrew / Conda /
-#     手動配置ツール・Python 環境）の優先順位や設定は極力変更しない。
+#     手動配置ツール・Python 環境・シェル設定）の優先順位や設定は極力変更しない。
 #   - PEP 668 に準拠し、Homebrew 管理下の Python 環境へ --break-system-packages で
 #     直接インストールすることは避け、専用仮想環境（~/.gitc_venv）を利用する。
 #
@@ -201,17 +201,18 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 4. パス（PATH）の自動設定（~/.zprofile への安全な追記）
+# 4. シェル環境（PATH・ls 表示）の自動設定（既存設定を保護して追記）
 # ------------------------------------------------------------------------------
 echo ""
 echo "------------------------------------------------------------"
-echo " [Step 4/4] パス（PATH）の設定を反映しています..."
+echo " [Step 4/4] シェル環境（PATH・ls 表示）の設定を反映しています..."
 echo "------------------------------------------------------------"
 
 ZPROFILE="$HOME/.zprofile"
-touch "$ZPROFILE"
+ZSHRC="$HOME/.zshrc"
+touch "$ZPROFILE" "$ZSHRC"
 
-# Apple Silicon Mac (/opt/homebrew/bin/brew) の PATH 設定を未登録時のみ追記
+# (1) Apple Silicon Mac (/opt/homebrew/bin/brew) の PATH 設定を未登録時のみ追記
 if [ "$BREW_BIN" = "/opt/homebrew/bin/brew" ]; then
     BREW_ENV_LINE='eval "$(/opt/homebrew/bin/brew shellenv)"'
     if ! grep -Fqx "$BREW_ENV_LINE" "$ZPROFILE"; then
@@ -226,21 +227,43 @@ if [ "$BREW_BIN" = "/opt/homebrew/bin/brew" ]; then
     fi
 fi
 
-# 専用仮想環境内に htseq-count がある場合、~/bin にリンクを作成して PATH 末尾に追加
+# (2) ~/bin ディレクトリの作成と PATH 設定（講義演習および htseq-count 用）
+mkdir -p "$HOME/bin"
 if [ -x "$VENV_DIR/bin/htseq-count" ]; then
-    mkdir -p "$HOME/bin"
     ln -sfn "$VENV_DIR/bin/htseq-count" "$HOME/bin/htseq-count"
+fi
 
-    USER_BIN_LINE='export PATH="$PATH:$HOME/bin"'
-    if ! grep -Fqx "$USER_BIN_LINE" "$ZPROFILE"; then
-        {
-            echo ""
-            echo "# Added by NIBB GITC setup script (User bin PATH)"
-            echo "$USER_BIN_LINE"
-        } >> "$ZPROFILE"
-        echo ">>> $ZPROFILE に $HOME/bin の PATH 設定を追記しました。"
-    fi
-    export PATH="$PATH:$HOME/bin"
+if grep -Eq '^[[:space:]]*[^#]*(\$HOME|~)/bin' "$ZPROFILE" "$ZSHRC" 2>/dev/null; then
+    echo ">>> 既存の ~/bin PATH 設定を検出しました（スキップ）。"
+else
+    cat << 'EOF' >> "$ZPROFILE"
+
+# Added by NIBB GITC setup script (User bin PATH)
+if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
+  export PATH="$PATH:$HOME/bin"
+fi
+EOF
+    echo ">>> $ZPROFILE に ~/bin の PATH 設定を追記しました。"
+fi
+
+case ":$PATH:" in
+    *":$HOME/bin:"*) ;;
+    *) export PATH="$PATH:$HOME/bin" ;;
+esac
+
+# (3) ls の色分け・種別記号表示（既存の ls 設定・CLICOLOR 設定がない場合のみ）
+if grep -Eq '^[[:space:]]*[^#]*(alias[[:space:]]+ls=|ls[[:space:]]*\(\)|CLICOLOR=)' "$ZSHRC" "$ZPROFILE" 2>/dev/null || \
+   grep -Fq "# Added by NIBB GITC setup script (ls color)" "$ZSHRC" 2>/dev/null; then
+    echo ">>> 既存の ls 表示設定を検出しました（スキップ）。"
+else
+    cat << 'EOF' >> "$ZSHRC"
+
+# Added by NIBB GITC setup script (ls color)
+if [[ "$(whence -w ls 2>/dev/null)" == "ls: command" ]] && [[ -z "${CLICOLOR:-}" ]]; then
+  alias ls='ls -GF'
+fi
+EOF
+    echo ">>> $ZSHRC に ls の表示設定（既存設定優先ガード付き）を追記しました。"
 fi
 
 # ------------------------------------------------------------------------------
